@@ -1,0 +1,77 @@
+Sub ALERT_SEND_RF500M(ComPort,Source As String * 120,Sent As String * 120)
+  'Maximum number of ID/VAL pairs that can be passed in is 10
+  Public IdVal(20) 'holds up to 10 id/value pairs
+  Public id, val, i, j, result
+
+  If Len(Source) > 0 Then
+
+    'initialize all elements to 0 and then split
+    'expecting csv list: id1,val1,id2,val2, ...
+    IdVal() = 0
+    SplitStr (IdVal,Source,0,20,0)
+
+    'go through list and only pairs with valid id
+    'this method is tolerant of id's in the middle of the list being invalid
+    'allowing a fairly static build method to use invalid id to enable/disable
+    'transmission
+    j = 0
+    Sent = ""
+    For i = 1 To 20 Step 2
+      id = IdVal(i)
+      val = IdVal(i+1)
+      If val < 0 OR val = NAN Then val = 0
+      If val > 2047 Then val = 2047
+      If id > 0 AND id < 8192 Then
+        j += 1
+        IdVal(j) = id
+        j += 1
+        IdVal(j) = val
+        Sent = Sent & "(" & id & "," & val & ")"
+      EndIf
+    Next i
+
+    'send data to rf500m for transmission
+    If j > 1 Then
+      SendVariables (result,ComPort,0,1,500,0,"Public","rl_var",IdVal,j)
+    EndIf
+
+  EndIf
+EndSub
+
+
+
+Const Precip_ID = 101
+Const ComRF500M = ComSDC7
+Const RadioControlPort = 1
+
+Public Precip As Long
+Dim PCount
+
+Dim ALERT As String * 120
+Public ALERT_SENT As String * 120
+
+BeginProg
+  Scan (1,Sec,3,0)
+
+    PulseCount (PCount,1,1,2,0,1.0,0) 'measure new counts since last scan
+    Precip = (Precip + PCount) MOD 2048 'update precip accumulator, constrain to 0 to 2047
+    If PCount > 0 Then
+      ALERT = Precip_ID & "," & Precip & ","
+    EndIf
+
+    If ALERT <> "" Then
+      If RadioControlPort > 0 Then
+        PortSet (RadioControlPort,1)
+        Delay (1,1,Sec)
+      EndIf
+      Call ALERT_SEND_RF500M(ComRF500M,ALERT,ALERT_SENT)
+      ALERT = ""
+      If RadioControlPort > 0 Then
+        Delay (1,3,Sec)
+        PortSet (RadioControlPort,0)
+      EndIf
+    EndIf
+    
+    SetStatus("SkippedScan",0)
+  NextScan
+EndProg
